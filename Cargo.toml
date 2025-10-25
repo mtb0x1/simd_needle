@@ -1,0 +1,49 @@
+[package]
+name = "simd_needle"
+version = "0.1.0"
+edition = "2021"
+
+[[bin]]
+name = "simd_needle"
+path = "src/main.rs"
+
+[[bin]]
+name = "simd_haystacks"
+path = "src/simd_haystacks.rs"
+
+[[bin]]
+name = "memchr_haystacks"
+path = "src/memchr_haystacks.rs"
+
+[[bin]]
+name = "memchr_libc_haystacks"
+path = "src/memchr_libc_haystacks.rs"
+
+[dependencies]
+#bin
+clap = { version = "4.0", features = ["derive"] }
+rayon = "1.11"
+walkdir = "2.5"
+glob = "0.3"
+memchr = "2.7.6"
+libc = "0.2.177"
+
+#lib
+bytes = "1.10.1"
+ 
+[dev-dependencies]
+criterion = "0.7.0"
+rand = "0.9.2"
+memchr = "2.7.6"
+libc = "0.2.177"
+ 
+[[bench]]
+name = "bench_search"
+harness = false
+
+
+[profile.release]
+opt-level = 3     # Optimize for size.
+lto = true          # Enable Link Time Optimization
+codegen-units = 1   # Reduce number of codegen units to increase optimizations.
+panic = 'abort'     # Abort on panic  
