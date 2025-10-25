@@ -1,5 +1,5 @@
 use clap::Parser;
-use simd_needle::{Finder, FinderTrait, SearchAlgo};
+use simd_needle::{MmapFinder, SearchAlgo};
 use std::fs::File;
 use std::io::BufReader;
 use std::path;
@@ -35,12 +35,11 @@ fn main() {
     println!("haystack: {}\nneedle: {}", args.haystack, args.needle);
 
     let haystack_path = path::Path::new(&args.haystack);
-    let needle = args.needle.into_bytes();
-    let haystack_reader = BufReader::new(File::open(haystack_path).unwrap());
 
-    let finder = Finder::with_algorithm(haystack_reader, needle, SearchAlgo::Simd).unwrap();
+    let finder = MmapFinder::new(haystack_path, args.needle.into_bytes())
+        .expect("Failed to create MmapFinder");
 
-    for pos in finder.flatten() {
+    finder.find_all(SearchAlgo::Simd).for_each(|pos| {
         println!("pos: {}", pos);
-    }
+    });
 }

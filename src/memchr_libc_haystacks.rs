@@ -13,13 +13,13 @@ struct Args {
 
 fn main() {
     let args = Args::parse();
-    eprint!("haystack: {}\nneedle: {}\n", args.haystack, args.needle);
+    println!("haystack: {}\nneedle: {}", args.haystack, args.needle);
 
     let haystack_path = path::Path::new(&args.haystack);
     let needle = args.needle.into_bytes();
 
     //file reader on haystack
-    let haystack_reader = std::fs::read(&haystack_path).unwrap();
+    let haystack_reader = std::fs::read(haystack_path).unwrap();
 
     let n = needle.len();
     if n == 0 || haystack_reader.len() < n {
@@ -42,7 +42,7 @@ fn main() {
         let pos = unsafe { (res as *const u8).offset_from(haystack_reader.as_ptr()) as usize };
 
         // Check if the rest of the bytes match the needle
-        if pos + n <= haystack_reader.len() && &haystack_reader[pos..pos + n] == needle {
+        if pos + n <= haystack_reader.len() && haystack_reader[pos..pos + n] == needle {
             println!("pos: {}", pos);
         }
 

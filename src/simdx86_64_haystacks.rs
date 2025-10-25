@@ -17,6 +17,8 @@ struct Args {
     needle: String,
 }
 
+//FIXME : better way than this when we are on not x86_64 architecture
+#[cfg(target_arch = "x86_64")]
 fn main() {
     #[cfg(feature = "debug")]
     {
@@ -38,9 +40,14 @@ fn main() {
     let needle = args.needle.into_bytes();
     let haystack_reader = BufReader::new(File::open(haystack_path).unwrap());
 
-    let finder = Finder::with_algorithm(haystack_reader, needle, SearchAlgo::Simd).unwrap();
+    let finder = Finder::with_algorithm(haystack_reader, needle, SearchAlgo::SimdX8664).unwrap();
 
     for pos in finder.flatten() {
         println!("pos: {}", pos);
     }
+}
+
+#[cfg(not(target_arch = "x86_64"))]
+fn main() {
+    eprintln!("This binary is only supported on x86_64 architecture.");
 }

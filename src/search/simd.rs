@@ -1,61 +1,199 @@
-#[cfg(target_arch = "x86_64")]
-use std::arch::x86_64::*;
-/// SIMD-based search implementation (to be implemented)
+use core::simd::{cmp::SimdPartialEq, LaneCount, Simd, SupportedLaneCount};
+
+#[cfg(feature = "debug")]
+use std::time::Instant;
+
+#[cfg(feature = "debug")]
+use tracing::{info, instrument, span, Level};
+
+// Select optimal SIMD width based on target architecture
+#[cfg(all(target_arch = "x86_64", target_feature = "avx512f"))]
+const SIMD_LANES: usize = 64;
+
+#[cfg(all(
+    target_arch = "x86_64",
+    target_feature = "avx2",
+    not(target_feature = "avx512f")
+))]
+const SIMD_LANES: usize = 32;
+
+#[cfg(all(target_arch = "x86_64", not(target_feature = "avx2")))]
+const SIMD_LANES: usize = 16;
+
+#[cfg(any(target_arch = "aarch64", target_arch = "arm"))]
+const SIMD_LANES: usize = 16;
+
+#[cfg(not(any(target_arch = "x86_64", target_arch = "aarch64", target_arch = "arm")))]
+const SIMD_LANES: usize = 16;
+
+// long story short, we use hardware SIMD size and overload it
+// most likely the botelneck is on computation not on memory access
+// maybe, who knows
+// FIXME: test different sizes per different architectures
+const SIMD_BOOST: usize = 4;
+const SIMD_SIZE_BOOSTED: usize = (SIMD_LANES * SIMD_BOOST).min(128);
+
+/// SIMD scan helper that searches for the first byte of needle in haystack
 ///
-/// # Arguments
-/// * `_haystack` - The data to search in
-/// * `_needle` - The pattern to search for
+/// Returns the index of a potential match candidate
+fn simd_scan_first_byte<const N: usize>(haystack: &[u8], first_byte: u8) -> Option<usize>
+where
+    LaneCount<N>: SupportedLaneCount,
+{
+    let needle_simd = Simd::<u8, N>::splat(first_byte);
+    let mut i = 0;
+
+    while i + N <= haystack.len() {
+        // Prefetch next chunk for better memory access performance
+        if i + N + N <= haystack.len() {
+            core::intrinsics::prefetch_read_data::<u8, 3>(&haystack[i + N]);
+        }
+
+        let chunk = Simd::<u8, N>::from_slice(&haystack[i..i + N]);
+        let matches = chunk.simd_eq(needle_simd);
+        let mask = matches.to_bitmask();
+
+        if mask != 0 {
+            // Found at least one matching byte, find first one
+            let offset = mask.trailing_zeros() as usize;
+            return Some(i + offset);
+        }
+
+        i += N;
+    }
+
+    // Check remaining bytes
+    haystack[i..]
+        .iter()
+        .position(|&b| b == first_byte)
+        .map(|pos| i + pos)
+}
+
+/// SIMD-based search implementation using portable SIMD
 ///
-/// # Returns
-/// * `Some(index)` of the first occurrence, or `None` if not found
+/// Uses a two-step approach:
+/// 1. SIMD scan to find candidates matching the first byte
+/// 2. Verification of full needle match at candidate positions
+#[cfg_attr(feature = "debug", instrument(skip(haystack, needle)))]
 pub fn simd_search(haystack: &[u8], needle: &[u8]) -> Option<usize> {
-    // Check if needle is empty or haystack is shorter than needle
     if needle.is_empty() || haystack.len() < needle.len() {
-        // Return None immediately since no match is possible
         return None;
     }
 
-    // This is necessary because we are using x86_64 intrinsics
-    unsafe {
-        // Load needle into SIMD register (padded with zeros if shorter than 16)
-        let mut needle_buf = [0u8; 16];
-        needle_buf[..needle.len()].copy_from_slice(needle);
-        let needle_simd = _mm_loadu_si128(needle_buf.as_ptr() as *const __m128i);
-
-        let mut i = 0;
-        // Loop while there are enough bytes for SIMD comparison
-        while i + 16 <= haystack.len() {
-            // Load 16 bytes from haystack
-            let block = _mm_loadu_si128(haystack[i..].as_ptr() as *const __m128i);
-            // Compare the block with needle
-            let cmp = _mm_cmpeq_epi8(block, needle_simd);
-            // Extract a bitmask where each bit indicates if corresponding bytes are equal
-            let mask = _mm_movemask_epi8(cmp);
-
-            // Check if the first needle.len() bytes match (all 1s in the mask for those positions)
-            let match_mask = (1i32 << needle.len()) - 1;
-            // Verify if the mask indicates a full match for the needle's length
-            if (mask & match_mask) == match_mask {
-                // Match confirmed, return the starting index
-                return Some(i);
-            }
-
-            i += 1; // Slide by 1 byte for thorough search
-        }
-
-        // Fallback for remaining bytes
-        while i + needle.len() <= haystack.len() {
-            // Use slice starts_with for exact match in remaining bytes
-            if haystack[i..].starts_with(needle) {
-                // Match found in tail, return index
-                return Some(i);
-            }
-            // Increment index for byte-by-byte search
-            i += 1;
-        }
-        // End of fallback search
+    // Single byte needle - use SIMD scan directly
+    if needle.len() == 1 {
+        return simd_scan_first_byte::<SIMD_SIZE_BOOSTED>(haystack, needle[0]);
     }
 
-    // no match was found in the entire haystack
+    let first_byte = needle[0];
+    let mut search_start = 0;
+
+    #[cfg(feature = "debug")]
+    let search_span = span!(Level::INFO, "search_loop").entered();
+
+    while search_start + needle.len() <= haystack.len() {
+        #[cfg(feature = "debug")]
+        let start_time = Instant::now();
+        // Use SIMD to find next candidate position
+        match simd_scan_first_byte::<SIMD_SIZE_BOOSTED>(&haystack[search_start..], first_byte) {
+            Some(offset) => {
+                let candidate_pos = search_start + offset;
+
+                // Check if we have enough bytes remaining
+                if candidate_pos + needle.len() > haystack.len() {
+                    return None;
+                }
+
+                // Verify full match
+                if &haystack[candidate_pos..candidate_pos + needle.len()] == needle {
+                    #[cfg(feature = "debug")]
+                    {
+                        info!("Match found at position {}", candidate_pos);
+
+                        info!(
+                            "simd_search () profiling: total time {:?}",
+                            start_time.elapsed()
+                        );
+                    }
+                    return Some(candidate_pos);
+                }
+
+                // Move past this candidate
+                search_start = candidate_pos + 1;
+            }
+            None => return None,
+        }
+    }
+
+    #[cfg(feature = "debug")]
+    drop(search_span);
+
     None
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn test_empty_needle() {
+        let haystack = b"hello world";
+        assert_eq!(simd_search(haystack, b""), None);
+    }
+
+    #[test]
+    fn test_needle_longer_than_haystack() {
+        let haystack = b"hi";
+        let needle = b"hello";
+        assert_eq!(simd_search(haystack, needle), None);
+    }
+
+    #[test]
+    fn test_no_match() {
+        let haystack = b"hello world";
+        let needle = b"xyz";
+        assert_eq!(simd_search(haystack, needle), None);
+    }
+
+    #[test]
+    fn test_match_at_beginning() {
+        let haystack = b"hello world";
+        let needle = b"hello";
+        assert_eq!(simd_search(haystack, needle), Some(0));
+    }
+
+    #[test]
+    fn test_match_in_middle() {
+        let haystack = b"hello world";
+        let needle = b"world";
+        assert_eq!(simd_search(haystack, needle), Some(6));
+    }
+
+    #[test]
+    fn test_match_at_end() {
+        let haystack = b"hello world";
+        let needle = b"ld";
+        assert_eq!(simd_search(haystack, needle), Some(9));
+    }
+
+    #[test]
+    fn test_repeating_pattern() {
+        let haystack = b"abababab";
+        let needle = b"aba";
+        assert_eq!(simd_search(haystack, needle), Some(0));
+    }
+
+    #[test]
+    fn test_single_character() {
+        let haystack = b"abc";
+        let needle = b"b";
+        assert_eq!(simd_search(haystack, needle), Some(1));
+    }
+
+    #[test]
+    fn test_scan_first_byte() {
+        let haystack = b"hello world";
+        assert_eq!(simd_scan_first_byte::<SIMD_LANES>(haystack, b'w'), Some(6));
+        assert_eq!(simd_scan_first_byte::<SIMD_LANES>(haystack, b'z'), None);
+    }
 }

@@ -52,6 +52,7 @@ jobs:
         run: |
           rustup toolchain install nightly --profile minimal --target ${{ matrix.target }}
           rustup default nightly
+          cargo install hyperfine
           rustc -V
           cargo -V
 
@@ -70,5 +71,18 @@ jobs:
       - name: Test
         run: cargo test --all
 
-      - name: Bench
-        run: cargo bench
+      - name: Bench not arm64
+        if: matrix.arch != 'arm64'
+        run: |
+          cargo bench --benches simd_x86_64 
+          cargo bench --benches simd
+          cargo bench --benches simd_mmap_finder
+
+      - name: Bench arm64
+        if: matrix.arch == 'arm64'
+        run: |
+          cargo bench --benches simd
+          cargo bench --benches simd_mmap_finder
+ 
+      - name: Bench CLI
+        run: bash ./benches/bench_cli.sh

@@ -3,13 +3,21 @@ name = "simd_needle"
 version = "0.1.0"
 edition = "2021"
 
-[[bin]]
-name = "simd_needle"
-path = "src/main.rs"
+#[[bin]]
+#name = "simd_needle"
+#path = "src/main.rs"
 
 [[bin]]
 name = "simd_haystacks"
 path = "src/simd_haystacks.rs"
+
+[[bin]]
+name = "simd_mmap_finder_haystacks"
+path = "src/simd_mmap_finder_haystacks.rs"
+
+[[bin]]
+name = "simdx86_64_haystacks"
+path = "src/simdx86_64_haystacks.rs"
 
 [[bin]]
 name = "memchr_haystacks"
@@ -27,20 +35,56 @@ walkdir = "2.5"
 glob = "0.3"
 memchr = "2.7.6"
 libc = "0.2.177"
+tracing = { version = "0.1", optional = true }
+tracing-subscriber = { version = "0.3", optional = true, features = ["env-filter"] }
 
 #lib
 bytes = "1.10.1"
- 
+memmap2 = "0.9"
+
+[features]
+debug = ["tracing", "tracing-subscriber"]
+
 [dev-dependencies]
 criterion = "0.7.0"
 rand = "0.9.2"
 memchr = "2.7.6"
 libc = "0.2.177"
+paste = "1.0"
+proptest = "1.0"
+tempfile = "3.0"
  
 [[bench]]
-name = "bench_search"
+name = "naive"
 harness = false
 
+[[bench]]
+name = "bmh"
+harness = false
+
+[[bench]]
+name = "kmp"
+harness = false
+
+[[bench]]
+name = "simd_mmap_finder"
+harness = false
+
+[[bench]]
+name = "simd_x86_64"
+harness = false
+
+[[bench]]
+name = "simd"
+harness = false
+
+[[bench]]
+name = "memchr"
+harness = false
+
+[[bench]]
+name = "memchr_libc"
+harness = false
 
 [profile.release]
 opt-level = 3     # Optimize for size.

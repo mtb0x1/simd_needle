@@ -15,18 +15,17 @@ struct Args {
 
 fn main() {
     let args = Args::parse();
-
-    eprint!("haystack: {}\nneedle: {}\n", args.haystack, args.needle);
+    println!("haystack: {}\nneedle: {}", args.haystack, args.needle);
 
     let haystack_path = path::Path::new(&args.haystack);
     let needle = args.needle.into_bytes();
 
     //file reader on haystack
-    let haystack_reader = std::fs::read(&haystack_path).unwrap();
+    let haystack_reader = std::fs::read(haystack_path).unwrap();
 
-    let mut finder = memmem::find_iter(&haystack_reader, &needle);
+    let finder = memmem::find_iter(&haystack_reader, &needle);
 
-    while let Some(pos) = finder.next() {
-        eprint!("pos: {}\n", pos);
+    for pos in finder {
+        println!("pos: {}", pos);
     }
 }
